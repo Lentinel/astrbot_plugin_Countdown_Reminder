@@ -1,4 +1,4 @@
-# astrbot_plugin_countdown_reminder
+# astrbot_plugin_Countdown_Reminder
 
 群聊倒计时播报插件。可记录考试、比赛、纪念日等重要事件，支持群成员主动查询，也支持每天定时向指定会话自动播报。
 
