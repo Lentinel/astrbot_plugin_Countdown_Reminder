@@ -107,6 +107,30 @@ class CountdownReminderPlugin(Star):
         """查看倒计时插件帮助。"""
         yield event.plain_result(self._help_text())
 
+    @filter.command("设置倒计时播报时间")
+    async def set_broadcast_time(self, event: AstrMessageEvent):
+        """设置每日倒计时播报时间。"""
+        time_text = self._extract_command_body(event.message_str, "设置倒计时播报时间")
+        current = self._get_broadcast_time_text()
+
+        if not time_text:
+            yield event.plain_result(
+                f"当前每日播报时间是 {current}。\n"
+                "格式要这样写：/设置倒计时播报时间 08:00"
+            )
+            return
+
+        normalized = self._normalize_broadcast_time(time_text)
+        if normalized is None:
+            yield event.plain_result(
+                "时间格式不对哦，请使用 24 小时制 HH:MM，例如 08:00 或 20:30。"
+            )
+            return
+
+        self.config["broadcast_time"] = normalized
+        self.config.save_config()
+        yield event.plain_result(f"每日倒计时播报时间已设置为 {normalized}。")
+
     @filter.command("开启倒计时播报")
     async def enable_broadcast(self, event: AstrMessageEvent):
         """把当前会话加入每日播报名单。"""
@@ -149,8 +173,9 @@ class CountdownReminderPlugin(Star):
             return
 
         now = self._now()
+        broadcast_time_text = self._get_broadcast_time_text()
         broadcast_hour, broadcast_minute = self._parse_broadcast_time(
-            self.config.get("broadcast_time", "08:00")
+            broadcast_time_text
         )
         if broadcast_hour is None or broadcast_minute is None:
             await self._maybe_warn_bad_broadcast_time(
@@ -159,20 +184,34 @@ class CountdownReminderPlugin(Star):
             return
 
         today_str = now.date().isoformat()
-        last_broadcast_date = await self.get_kv_data("last_broadcast_date", "")
+        last_broadcast_state = await self.get_kv_data("last_broadcast_state", {})
+        if not isinstance(last_broadcast_state, dict):
+            last_broadcast_state = {}
         has_reached_time = (now.hour, now.minute) >= (broadcast_hour, broadcast_minute)
+        already_broadcast_for_slot = (
+            last_broadcast_state.get("date") == today_str
+            and last_broadcast_state.get("time") == broadcast_time_text
+        )
 
-        if not has_reached_time or last_broadcast_date == today_str:
+        if not has_reached_time or already_broadcast_for_slot:
             return
 
         summary = self._render_summary(is_broadcast=True)
+        sent_count = 0
         for target in targets:
             try:
                 await self.context.send_message(target, MessageChain().message(summary))
+                sent_count += 1
             except Exception as exc:  # pragma: no cover - 平台差异较大
                 logger.exception(f"发送倒计时播报失败，target={target}: {exc}")
 
-        await self.put_kv_data("last_broadcast_date", today_str)
+        if sent_count > 0:
+            await self.put_kv_data(
+                "last_broadcast_state",
+                {"date": today_str, "time": broadcast_time_text},
+            )
+        else:
+            logger.warning("倒计时播报未成功发送到任何目标会话，本次不会记录为已播报。")
 
     def _render_summary(self, is_broadcast: bool) -> str:
         events = self._load_events()
@@ -180,9 +219,9 @@ class CountdownReminderPlugin(Star):
 
         if is_broadcast:
             if visible_lines:
-                header = "早上好呀，今天的倒计时播报来啦："
+                header = f"{self._time_greeting()}，今天的倒计时播报来啦："
                 return "\n".join([header, *visible_lines])
-            return "早上好呀，当前还没有可播报的倒计时事件。"
+            return f"{self._time_greeting()}，当前还没有可播报的倒计时事件。"
 
         if visible_lines:
             header = "倒计时清单已送达，请查收："
@@ -314,6 +353,7 @@ class CountdownReminderPlugin(Star):
                 "/删除倒计时 事件名称",
                 "示例：/删除倒计时 2026 考研",
                 "/倒计时",
+                "/设置倒计时播报时间 08:00",
                 "/开启倒计时播报",
                 "/关闭倒计时播报",
                 "小提示：事件名称现在支持空格啦。",
@@ -322,6 +362,14 @@ class CountdownReminderPlugin(Star):
 
     def _normalize_name(self, name: str) -> str:
         return " ".join(name.split()).strip()
+
+    def _time_greeting(self) -> str:
+        hour = self._now().hour
+        if 5 <= hour < 12:
+            return "早上好呀"
+        if 12 <= hour < 18:
+            return "下午好呀"
+        return "晚上好呀"
 
     async def _maybe_warn_bad_broadcast_time(self, value: str) -> None:
         value_str = str(value)
@@ -338,12 +386,33 @@ class CountdownReminderPlugin(Star):
         await self.put_kv_data(key, {"date": today, "value": value_str})
 
     def _parse_broadcast_time(self, value: str) -> tuple[int | None, int | None]:
-        try:
-            parsed = datetime.strptime(value, "%H:%M")
-        except ValueError:
-            logger.warning("broadcast_time 配置格式错误，正确格式应为 HH:MM。")
+        normalized = self._normalize_broadcast_time(value)
+        if normalized is None:
             return None, None
+        parsed = datetime.strptime(normalized, "%H:%M")
         return parsed.hour, parsed.minute
+
+    def _normalize_broadcast_time(self, value: str) -> str | None:
+        text = str(value).strip()
+        if ":" not in text:
+            return None
+
+        hour_text, minute_text = text.split(":", 1)
+        if not hour_text.isdigit() or not minute_text.isdigit():
+            return None
+
+        hour = int(hour_text)
+        minute = int(minute_text)
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            return None
+
+        return f"{hour:02d}:{minute:02d}"
+
+    def _get_broadcast_time_text(self) -> str:
+        normalized = self._normalize_broadcast_time(
+            self.config.get("broadcast_time", "08:00")
+        )
+        return normalized or "08:00"
 
     def _now(self) -> datetime:
         return datetime.now(self._get_timezone())
