@@ -1,0 +1,47 @@
+{
+  "events": {
+    "type": "template_list",
+    "description": "倒计时事件列表，可在管理面板中直接新增、编辑和删除。",
+    "templates": {
+      "countdown_event": {
+        "name": "倒计时事件",
+        "hint": "事件名称建议简短且唯一，日期格式请使用 YYYY-MM-DD。",
+        "items": {
+          "name": {
+            "description": "事件名称",
+            "type": "string",
+            "default": ""
+          },
+          "target_date": {
+            "description": "目标日期",
+            "type": "string",
+            "hint": "格式示例：2025-12-20",
+            "default": ""
+          }
+        }
+      }
+    }
+  },
+  "broadcast_time": {
+    "type": "string",
+    "description": "每日播报时间",
+    "hint": "24 小时制，格式为 HH:MM，例如 08:00。",
+    "default": "08:00"
+  },
+  "broadcast_targets": {
+    "type": "list",
+    "description": "每日播报目标会话列表",
+    "hint": "建议优先通过“/开启倒计时播报”与“/关闭倒计时播报”在群内维护。这里也可以手动编辑 unified_msg_origin 列表。",
+    "default": []
+  },
+  "timezone": {
+    "type": "string",
+    "description": "倒计时计算与定时播报使用的时区",
+    "default": "Asia/Shanghai"
+  },
+  "allow_past_events": {
+    "type": "bool",
+    "description": "是否显示并允许添加已过期事件",
+    "default": false
+  }
+}
